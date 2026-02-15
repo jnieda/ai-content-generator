@@ -27,7 +27,9 @@ class AIContentGenerator:
         """記事アイデアを3つ生成"""
         
         # 戦略ファイルを読み込み
-        with open('/home/claude/content_strategy.md', 'r', encoding='utf-8') as f:
+        import os
+        strategy_path = os.path.join(os.path.dirname(__file__), 'content_strategy.md')
+        with open(strategy_path, 'r', encoding='utf-8') as f:
             strategy = f.read()
         
         prompt = f"""
@@ -78,7 +80,9 @@ class AIContentGenerator:
     def generate_full_article(self, idea: Dict[str, str]) -> Dict[str, str]:
         """選択されたアイデアから完全な記事を生成"""
         
-        with open('/home/claude/content_strategy.md', 'r', encoding='utf-8') as f:
+        import os
+        strategy_path = os.path.join(os.path.dirname(__file__), 'content_strategy.md')
+        with open(strategy_path, 'r', encoding='utf-8') as f:
             strategy = f.read()
         
         prompt = f"""
@@ -229,7 +233,7 @@ def main():
     print(f"   ハッシュタグ: {', '.join(article['hashtags'])}")
     
     # ステップ5: 記事を保存
-    filename = f"/home/claude/{generator.today.strftime('%Y%m%d')}_article.md"
+    filename = f"{generator.today.strftime('%Y%m%d')}_article.md"
     generator.save_article(article, filename)
     print(f"\n💾 記事を保存しました: {filename}")
     
