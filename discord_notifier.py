@@ -1,317 +1,251 @@
 """
-Discord通知システム
-記事アイデアの提案と完成通知を送信
+AI初心者向けNote記事自動生成システム
+毎日午前5時に実行して、記事案の提案→承認→記事生成→通知を行う
+Discord通知対応版
 """
 
-import os
+import anthropic
 import json
+from datetime import datetime, timedelta
+import os
+from typing import List, Dict
 import requests
-from typing import List, Dict, Optional
-from datetime import datetime
+from discord_notifier import DiscordNotifier
 
-class DiscordNotifier:
-    def __init__(self, webhook_url: Optional[str] = None):
-        self.webhook_url = webhook_url or os.getenv('DISCORD_WEBHOOK_URL')
-        if not self.webhook_url:
-            print("⚠️  警告: DISCORD_WEBHOOK_URLが設定されていません")
+class AIContentGenerator:
+    def __init__(self, api_key: str):
+        self.client = anthropic.Anthropic(api_key=api_key)
+        self.today = datetime.now()
+        
+    def search_latest_ai_news(self) -> str:
+        """最新のAIニュースを検索"""
+        # 実際の実装ではweb_search toolを使用
+        # ここではプレースホルダー
+        return "最新のAIニュース検索結果"
     
-    def send_message(self, content: str = None, embeds: Optional[List[Dict]] = None):
-        """Discordにメッセージを送信"""
-        if not self.webhook_url:
-            print("📧 [通知メッセージ]")
-            if content:
-                print(content)
-            return
+    def generate_article_ideas(self) -> List[Dict[str, str]]:
+        """記事アイデアを3つ生成"""
         
-        payload = {}
-        if content:
-            payload["content"] = content
-        if embeds:
-            payload["embeds"] = embeds
+        # 戦略ファイルを読み込み
+        import os
+        strategy_path = os.path.join(os.path.dirname(__file__), 'content_strategy.md')
+        with open(strategy_path, 'r', encoding='utf-8') as f:
+            strategy = f.read()
         
-        try:
-            response = requests.post(
-                self.webhook_url,
-                json=payload,
-                headers={'Content-Type': 'application/json'}
-            )
-            if response.status_code in [200, 204]:
-                print("✅ Discord通知を送信しました")
-            else:
-                print(f"❌ Discord通知の送信に失敗: {response.status_code}")
-                print(f"   レスポンス: {response.text}")
-        except Exception as e:
-            print(f"❌ エラー: {e}")
+        prompt = f"""
+あなたはAI活用初心者向けのNoteメディアの編集者です。
+
+# コンテンツ戦略
+{strategy}
+
+# タスク
+今日（{self.today.strftime('%Y年%m月%d日 %A')}）に投稿する記事のアイデアを3つ提案してください。
+
+## 条件
+1. 週間スケジュールに沿った内容
+2. AI初心者が「今日から使える」実践的な内容
+3. 最新のトレンドも考慮（ただし初心者向けに翻訳）
+4. タイトルはNote向けに最適化（クリックされやすい）
+
+## 出力形式（JSON）
+{{
+  "ideas": [
+    {{
+      "id": 1,
+      "title": "記事タイトル",
+      "category": "カテゴリ名",
+      "target_word_count": 2000,
+      "key_points": ["ポイント1", "ポイント2", "ポイント3"],
+      "why_now": "今このテーマが重要な理由",
+      "estimated_read_time": "5分"
+    }}
+  ]
+}}
+"""
+        
+        response = self.client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        # JSONを抽出
+        content = response.content[0].text
+        # ```json ``` を除去
+        json_str = content.replace('```json', '').replace('```', '').strip()
+        ideas = json.loads(json_str)
+        
+        return ideas['ideas']
     
-    def send_article_ideas(self, ideas: List[Dict], date: str):
-        """記事アイデアの提案通知"""
+    def generate_full_article(self, idea: Dict[str, str]) -> Dict[str, str]:
+        """選択されたアイデアから完全な記事を生成"""
         
-        # Discord Embed形式
-        embeds = [
-            {
-                "title": f"🤖 {date}の記事アイデア",
-                "description": "今日投稿する記事を選んでください！\n番号（1、2、3）で返信してください。",
-                "color": 3447003,  # 青色
-                "timestamp": datetime.utcnow().isoformat(),
-                "footer": {
-                    "text": "AI記事自動生成システム"
-                }
-            }
-        ]
+        import os
+        strategy_path = os.path.join(os.path.dirname(__file__), 'content_strategy.md')
+        with open(strategy_path, 'r', encoding='utf-8') as f:
+            strategy = f.read()
         
-        # 各アイデアを別のEmbedとして追加
-        for i, idea in enumerate(ideas, 1):
-            embed = {
-                "title": f"{i}. {idea['title']}",
-                "color": 15844367 if i == 1 else (15105570 if i == 2 else 3066993),  # 異なる色
-                "fields": [
-                    {
-                        "name": "📁 カテゴリ",
-                        "value": idea['category'],
-                        "inline": True
-                    },
-                    {
-                        "name": "📝 目標文字数",
-                        "value": f"{idea['target_word_count']}文字",
-                        "inline": True
-                    },
-                    {
-                        "name": "⏱️ 読了時間",
-                        "value": idea['estimated_read_time'],
-                        "inline": True
-                    },
-                    {
-                        "name": "💡 今このテーマが重要な理由",
-                        "value": idea['why_now'],
-                        "inline": False
-                    },
-                    {
-                        "name": "📌 主なポイント",
-                        "value": "\n".join([f"• {point}" for point in idea['key_points']]),
-                        "inline": False
-                    }
-                ]
-            }
-            embeds.append(embed)
+        prompt = f"""
+あなたはAI活用初心者向けのプロのライターです。
+
+# 記事企画
+タイトル: {idea['title']}
+カテゴリ: {idea['category']}
+目標文字数: {idea['target_word_count']}文字
+重要ポイント: {', '.join(idea['key_points'])}
+
+# コンテンツガイドライン
+{strategy}
+
+# タスク
+上記の企画に基づき、Note向けの完全な記事を執筆してください。
+
+## 記事構成
+1. アイキャッチ的な導入（150字程度）
+2. 本文（見出しh2を3-5個、各セクション300-500字）
+3. まとめ（150字程度）
+4. CTA（次のアクション提案）
+
+## 重要な執筆ルール
+- AI初心者でも理解できる平易な言葉
+- 専門用語には必ず説明を添える
+- 具体例・手順を豊富に
+- 「私も最初は〜」など共感表現を入れる
+- 箇条書きを効果的に使う
+- 実際に試せる内容を含める
+
+## 出力形式（JSON）
+{{
+  "title": "最終的な記事タイトル（SEO最適化済み）",
+  "subtitle": "サブタイトル（あれば）",
+  "body": "記事本文（マークダウン形式）",
+  "hashtags": ["タグ1", "タグ2", "タグ3", "タグ4", "タグ5"],
+  "summary": "記事の要約（100字程度）",
+  "estimated_read_time": "読了時間の目安"
+}}
+
+記事本文はNoteに直接コピペできる形式で、マークダウンで記述してください。
+"""
         
-        # 最後に選択を促すEmbed
-        embeds.append({
-            "title": "👉 どの記事を書きますか？",
-            "description": "このチャンネルに **1**、**2**、または **3** と返信してください",
-            "color": 5763719,  # 緑色
-        })
+        response = self.client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=8000,
+            messages=[{"role": "user", "content": prompt}]
+        )
         
-        self.send_message(embeds=embeds)
+        content = response.content[0].text
+        json_str = content.replace('```json', '').replace('```', '').strip()
+        article = json.loads(json_str)
+        
+        return article
     
-    def send_article_ready(self, article: Dict, filename: str):
-        """記事完成通知"""
+    def save_article(self, article: Dict[str, str], filename: str):
+        """生成した記事を保存"""
         
-        embeds = [
-            {
-                "title": "✅ 記事が完成しました！",
-                "description": f"**{article['title']}**",
-                "color": 3066993,  # 緑色
-                "timestamp": datetime.utcnow().isoformat(),
-                "fields": [
-                    {
-                        "name": "📊 文字数",
-                        "value": f"約{len(article['body'])}文字",
-                        "inline": True
-                    },
-                    {
-                        "name": "⏱️ 読了時間",
-                        "value": article['estimated_read_time'],
-                        "inline": True
-                    },
-                    {
-                        "name": "\u200b",  # 空フィールド（改行用）
-                        "value": "\u200b",
-                        "inline": False
-                    },
-                    {
-                        "name": "🏷️ ハッシュタグ",
-                        "value": " ".join(['#' + tag for tag in article['hashtags']]),
-                        "inline": False
-                    },
-                    {
-                        "name": "📝 要約",
-                        "value": article['summary'],
-                        "inline": False
-                    }
-                ],
-                "footer": {
-                    "text": f"ファイル: {filename}"
-                }
-            },
-            {
-                "title": "📄 次のステップ",
-                "description": (
-                    "1️⃣ 記事ファイルをダウンロード\n"
-                    "2️⃣ Noteの編集画面を開く\n"
-                    "3️⃣ コピー&ペースト\n"
-                    "4️⃣ 公開ボタンをクリック\n\n"
-                    "⏰ **所要時間: 約3分**"
-                ),
-                "color": 15844367,  # オレンジ色
-            }
-        ]
+        # 記事をマークダウン形式で保存
+        output = f"""# {article['title']}
+
+{article.get('subtitle', '')}
+
+{article['body']}
+
+---
+
+**ハッシュタグ**: {' '.join(['#' + tag for tag in article['hashtags']])}
+
+**読了時間**: {article['estimated_read_time']}
+
+**要約**: {article['summary']}
+"""
         
-        self.send_message(embeds=embeds)
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(output)
+        
+        # メタデータも保存
+        meta_filename = filename.replace('.md', '_meta.json')
+        with open(meta_filename, 'w', encoding='utf-8') as f:
+            json.dump(article, f, ensure_ascii=False, indent=2)
     
-    def send_weekly_report(self, stats: Dict):
-        """週次レポート通知（日曜12:00）"""
+    def send_notification(self, notifier: DiscordNotifier, ideas: List[Dict] = None, 
+                         article: Dict = None, notification_type: str = "ideas"):
+        """通知を送信（Discord）"""
         
-        # 人気記事のフォーマット
-        top_articles_text = "\n".join([
-            f"{i+1}. **{article['title']}** ({article['views']:,} PV)" 
-            for i, article in enumerate(stats.get('top_articles', []))
-        ])
-        
-        if not top_articles_text:
-            top_articles_text = "データ収集中..."
-        
-        embeds = [
-            {
-                "title": "📊 週次レポート",
-                "description": "今週のパフォーマンスサマリー",
-                "color": 10181046,  # 紫色
-                "timestamp": datetime.utcnow().isoformat(),
-                "fields": [
-                    {
-                        "name": "📝 投稿記事数",
-                        "value": f"**{stats.get('articles_posted', 0)}本**",
-                        "inline": True
-                    },
-                    {
-                        "name": "👁️ 総PV",
-                        "value": f"**{stats.get('total_views', 0):,}**",
-                        "inline": True
-                    },
-                    {
-                        "name": "👥 新規フォロワー",
-                        "value": f"**{stats.get('new_followers', 0)}人**",
-                        "inline": True
-                    },
-                    {
-                        "name": "💰 収益",
-                        "value": f"**¥{stats.get('revenue', 0):,}**",
-                        "inline": True
-                    },
-                    {
-                        "name": "\u200b",
-                        "value": "\u200b",
-                        "inline": False
-                    },
-                    {
-                        "name": "🏆 人気記事TOP3",
-                        "value": top_articles_text,
-                        "inline": False
-                    }
-                ],
-                "footer": {
-                    "text": "AI記事自動生成システム 週次レポート"
-                }
-            },
-            {
-                "title": "💡 来週の提案",
-                "description": stats.get('next_week_suggestion', '引き続き頑張りましょう！'),
-                "color": 3447003,  # 青色
-            }
-        ]
-        
-        self.send_message(embeds=embeds)
-    
-    def send_simple_message(self, title: str, message: str, color: int = 3447003):
-        """シンプルなメッセージ送信"""
-        embeds = [
-            {
-                "title": title,
-                "description": message,
-                "color": color,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        ]
-        self.send_message(embeds=embeds)
+        if notification_type == "ideas" and ideas:
+            date_str = self.today.strftime('%Y年%m月%d日（%a）')
+            # 曜日を日本語に変換
+            weekday_map = {'Mon': '月', 'Tue': '火', 'Wed': '水', 'Thu': '木', 
+                          'Fri': '金', 'Sat': '土', 'Sun': '日'}
+            for en, ja in weekday_map.items():
+                date_str = date_str.replace(en, ja)
+            
+            notifier.send_article_ideas(ideas, date_str)
+            
+        elif notification_type == "article_ready" and article:
+            filename = f"{self.today.strftime('%Y%m%d')}_article.md"
+            notifier.send_article_ready(article, filename)
 
 
-# テスト用
-if __name__ == "__main__":
+def main():
+    """メイン実行フロー（午前5時に自動実行）"""
+    
+    # APIキーを環境変数から取得
+    api_key = os.getenv('ANTHROPIC_API_KEY', 'your-api-key-here')
+    
+    generator = AIContentGenerator(api_key)
     notifier = DiscordNotifier()
     
-    # テスト通知
-    test_ideas = [
-        {
-            "id": 1,
-            "title": "ChatGPT無料版と有料版、どっちを選ぶべき？【2025年版】",
-            "category": "基礎知識シリーズ",
-            "target_word_count": 2000,
-            "key_points": [
-                "無料版でできること・できないこと",
-                "有料版の3つのメリット",
-                "あなたに最適なプランの見極め方"
-            ],
-            "why_now": "2025年に入りChatGPTの機能が大幅アップデート。無料版も強化されたため、改めて比較が必要",
-            "estimated_read_time": "5分"
-        },
-        {
-            "id": 2,
-            "title": "議事録を3分で作成｜ChatGPTテンプレート【コピペOK】",
-            "category": "実践チュートリアル",
-            "target_word_count": 2500,
-            "key_points": [
-                "音声を自動でテキスト化する方法",
-                "議事録に最適化されたプロンプト",
-                "実際の使用例とビフォー・アフター"
-            ],
-            "why_now": "リモートワークが定着し、オンライン会議の議事録作成が日常業務に",
-            "estimated_read_time": "7分"
-        },
-        {
-            "id": 3,
-            "title": "Google Gemini 2.0発表｜普通の人に何が変わる？【3分解説】",
-            "category": "最新ニュース解説",
-            "target_word_count": 1500,
-            "key_points": [
-                "Gemini 2.0の3つの新機能",
-                "ChatGPTと何が違う？",
-                "今日から試せる使い方"
-            ],
-            "why_now": "Googleが2月に発表したばかりの最新AI。初心者向けの解説がまだ少ない",
-            "estimated_read_time": "4分"
-        }
-    ]
+    print("=" * 60)
+    print("AI記事自動生成システム起動 (Discord版)")
+    print(f"日時: {generator.today.strftime('%Y年%m月%d日 %H:%M:%S')}")
+    print("=" * 60)
     
-    print("\n=== 記事アイデア通知のテスト ===")
-    notifier.send_article_ideas(test_ideas, "2025年2月14日（金）")
+    # ステップ1: 記事アイデア生成
+    print("\n📝 記事アイデアを生成中...")
+    ideas = generator.generate_article_ideas()
     
-    print("\n=== 記事完成通知のテスト ===")
-    test_article = {
-        "title": "ChatGPT無料版と有料版、どっちを選ぶべき？【2025年版完全ガイド】",
-        "body": "（本文省略）" * 100,
-        "hashtags": ["AI初心者", "ChatGPT", "使い方", "比較", "解説"],
-        "summary": "ChatGPTの無料版と有料版を徹底比較。あなたに最適なプランの選び方を初心者向けに解説します。",
-        "estimated_read_time": "5分"
-    }
-    notifier.send_article_ready(test_article, "20250214_article.md")
+    print(f"\n✅ {len(ideas)}件のアイデアを生成しました")
+    for i, idea in enumerate(ideas, 1):
+        print(f"\n{i}. {idea['title']}")
+        print(f"   カテゴリ: {idea['category']}")
+        print(f"   理由: {idea['why_now']}")
     
-    print("\n=== 週次レポート通知のテスト ===")
-    test_stats = {
-        "articles_posted": 3,
-        "total_views": 4250,
-        "new_followers": 42,
-        "revenue": 3500,
-        "top_articles": [
-            {"title": "ChatGPT無料版vs有料版", "views": 1820},
-            {"title": "議事録3分作成術", "views": 1340},
-            {"title": "Gemini 2.0解説", "views": 1090}
-        ],
-        "next_week_suggestion": "「実践チュートリアル」カテゴリの人気が高いです。来週は業務効率化系の記事を2本投稿しましょう！"
-    }
-    notifier.send_weekly_report(test_stats)
+    # ステップ2: Discord通知送信
+    print("\n📤 Discordに通知を送信中...")
+    generator.send_notification(notifier, ideas=ideas, notification_type="ideas")
     
-    print("\n=== シンプルメッセージのテスト ===")
-    notifier.send_simple_message(
-        "✅ システム起動完了",
-        "AI記事自動生成システムが正常に起動しました。",
-        color=3066993
-    )
+    # ステップ3: ユーザーの選択を待つ（実際には外部からの入力）
+    print("\n⏳ あなたの選択を待っています...")
+    print("（実際の運用では、Discord/Webhook経由で選択を受け付けます）")
+    
+    # デモ用に自動選択（実際の運用では外部入力を待つ）
+    selected_id = 0  # 最初のアイデアを選択
+    selected_idea = ideas[selected_id]
+    
+    print(f"\n✅ 選択された記事: {selected_idea['title']}")
+    
+    # ステップ4: 完全な記事を生成
+    print("\n📝 記事を執筆中...")
+    article = generator.generate_full_article(selected_idea)
+    
+    print(f"\n✅ 記事生成完了！")
+    print(f"   タイトル: {article['title']}")
+    print(f"   文字数: 約{len(article['body'])}文字")
+    print(f"   ハッシュタグ: {', '.join(article['hashtags'])}")
+    
+    # ステップ5: 記事を保存
+    filename = f"{generator.today.strftime('%Y%m%d')}_article.md"
+    generator.save_article(article, filename)
+    print(f"\n💾 記事を保存しました: {filename}")
+    
+    # ステップ6: 記事ファイルをDiscordに送信
+    print("\n📤 記事ファイルをDiscordに送信中...")
+    notifier.send_article_file(article, filename, filename)
+    
+    print("\n" + "=" * 60)
+    print("✅ すべての処理が完了しました！")
+    print("📱 Discordで記事ファイルをダウンロードできます")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
