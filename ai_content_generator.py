@@ -237,12 +237,13 @@ def main():
     generator.save_article(article, filename)
     print(f"\n💾 記事を保存しました: {filename}")
     
-    # ステップ6: 完了通知
-    print("\n📤 Discordに完了通知を送信中...")
-    generator.send_notification(notifier, article=article, notification_type="article_ready")
+    # ステップ6: 記事ファイルをDiscordに送信
+    print("\n📤 記事ファイルをDiscordに送信中...")
+    notifier.send_article_file(article, filename, filename)
     
     print("\n" + "=" * 60)
     print("✅ すべての処理が完了しました！")
+    print("📱 Discordで記事ファイルをダウンロードできます")
     print("=" * 60)
 
 
