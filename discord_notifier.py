@@ -1,11 +1,13 @@
 """
 Discord通知システム
 記事アイデアの提案と完成通知を送信
+レート制限対策版
 """
 
 import os
 import json
 import requests
+import time
 from typing import List, Dict, Optional
 from datetime import datetime
 
@@ -33,20 +35,41 @@ class DiscordNotifier:
             response = requests.post(
                 self.webhook_url,
                 json=payload,
-                headers={'Content-Type': 'application/json'}
+                headers={'Content-Type': 'application/json'},
+                timeout=30  # タイムアウトを30秒に設定
             )
             if response.status_code in [200, 204]:
                 print("✅ Discord通知を送信しました")
+                time.sleep(2)  # レート制限対策：2秒待機
+            elif response.status_code == 429:
+                # レート制限に引っかかった場合
+                print("⚠️ Discord APIレート制限に到達。10秒待機します...")
+                time.sleep(10)
+                # リトライ
+                response = requests.post(
+                    self.webhook_url,
+                    json=payload,
+                    headers={'Content-Type': 'application/json'},
+                    timeout=30
+                )
+                if response.status_code in [200, 204]:
+                    print("✅ Discord通知を送信しました（リトライ成功）")
+                    time.sleep(2)
+                else:
+                    print(f"❌ Discord通知の送信に失敗（リトライ後）: {response.status_code}")
+                    print(f"   レスポンス: {response.text}")
             else:
                 print(f"❌ Discord通知の送信に失敗: {response.status_code}")
                 print(f"   レスポンス: {response.text}")
+        except requests.exceptions.Timeout:
+            print("❌ Discord通知送信がタイムアウトしました")
         except Exception as e:
             print(f"❌ エラー: {e}")
     
     def send_article_ideas(self, ideas: List[Dict], date: str):
-        """記事アイデアの提案通知"""
+        """記事アイデアの提案通知（全て1回のリクエストで送信）"""
         
-        # Discord Embed形式
+        # 全てのEmbedを配列にまとめる
         embeds = [
             {
                 "title": f"🤖 {date}の記事アイデア",
@@ -59,11 +82,12 @@ class DiscordNotifier:
             }
         ]
         
-        # 各アイデアを別のEmbedとして追加
-        for i, idea in enumerate(ideas, 1):
+        # 各アイデアを追加（最大3個）
+        colors = [15844367, 15105570, 3066993]  # オレンジ、黄色、緑
+        for i, idea in enumerate(ideas[:3], 1):  # 最大3個まで
             embed = {
                 "title": f"{i}. {idea['title']}",
-                "color": 15844367 if i == 1 else (15105570 if i == 2 else 3066993),  # 異なる色
+                "color": colors[i-1] if i <= len(colors) else 3447003,
                 "fields": [
                     {
                         "name": "📁 カテゴリ",
@@ -71,36 +95,37 @@ class DiscordNotifier:
                         "inline": True
                     },
                     {
-                        "name": "📝 目標文字数",
+                        "name": "📝 目標",
                         "value": f"{idea['target_word_count']}文字",
                         "inline": True
                     },
                     {
-                        "name": "⏱️ 読了時間",
+                        "name": "⏱️ 読了",
                         "value": idea['estimated_read_time'],
                         "inline": True
                     },
                     {
-                        "name": "💡 今このテーマが重要な理由",
+                        "name": "💡 なぜ今？",
                         "value": idea['why_now'],
                         "inline": False
                     },
                     {
-                        "name": "📌 主なポイント",
-                        "value": "\n".join([f"• {point}" for point in idea['key_points']]),
+                        "name": "📌 ポイント",
+                        "value": "\n".join([f"• {point}" for point in idea['key_points'][:3]]),  # 最大3個
                         "inline": False
                     }
                 ]
             }
             embeds.append(embed)
         
-        # 最後に選択を促すEmbed
+        # 選択を促すフッター
         embeds.append({
             "title": "👉 どの記事を書きますか？",
-            "description": "このチャンネルに **1**、**2**、または **3** と返信してください",
+            "description": "**1**、**2**、または **3** と返信してください",
             "color": 5763719,  # 緑色
         })
         
+        # 1回のリクエストで全て送信（Discord Webhookは最大10個まで対応）
         self.send_message(embeds=embeds)
     
     def send_article_ready(self, article: Dict, filename: str):
@@ -234,11 +259,14 @@ class DiscordNotifier:
         self.send_message(embeds=embeds)
     
     def send_article_file(self, article: Dict, filename: str, filepath: str):
-        """記事ファイルを添付して送信"""
+        """記事ファイルを添付して送信（レート制限対策版）"""
         if not self.webhook_url:
             print("📧 [ファイル送信]")
             print(f"ファイル: {filename}")
             return
+        
+        # まず2秒待機（前のリクエストとの間隔を空ける）
+        time.sleep(2)
         
         # Embed（記事情報）
         embeds = [
@@ -289,14 +317,40 @@ class DiscordNotifier:
                 response = requests.post(
                     self.webhook_url,
                     data=payload,
-                    files=files
+                    files=files,
+                    timeout=30
                 )
                 
                 if response.status_code in [200, 204]:
                     print("✅ 記事ファイルをDiscordに送信しました")
+                elif response.status_code == 429:
+                    # レート制限に引っかかった場合
+                    print("⚠️ Discord APIレート制限に到達。10秒待機してリトライします...")
+                    time.sleep(10)
+                    
+                    # リトライ（ファイルを再度開く必要がある）
+                    with open(filepath, 'rb') as f_retry:
+                        files_retry = {
+                            'file': (filename, f_retry, 'text/markdown')
+                        }
+                        response = requests.post(
+                            self.webhook_url,
+                            data=payload,
+                            files=files_retry,
+                            timeout=30
+                        )
+                        if response.status_code in [200, 204]:
+                            print("✅ 記事ファイルをDiscordに送信しました（リトライ成功）")
+                        else:
+                            print(f"❌ ファイル送信に失敗（リトライ後）: {response.status_code}")
+                            print(f"   レスポンス: {response.text}")
                 else:
                     print(f"❌ ファイル送信に失敗: {response.status_code}")
                     print(f"   レスポンス: {response.text}")
+        except requests.exceptions.Timeout:
+            print("❌ ファイル送信がタイムアウトしました")
+        except FileNotFoundError:
+            print(f"❌ ファイルが見つかりません: {filepath}")
         except Exception as e:
             print(f"❌ ファイル送信エラー: {e}")
 
