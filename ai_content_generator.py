@@ -1,7 +1,7 @@
 """
 AI初心者向けNote記事自動生成システム
-毎日午前5時に実行して、記事案の提案→承認→記事生成→Google Drive保存→通知を行う
-Discord通知 + Google Drive保存版
+毎日午前5時に実行して、記事案の提案→承認→記事生成→メール送信→通知を行う
+Discord通知 + メール送信版
 """
 
 import anthropic
@@ -11,7 +11,7 @@ import os
 from typing import List, Dict
 import requests
 from discord_notifier import DiscordNotifier
-from google_drive_manager import GoogleDriveManager
+from email_sender import EmailSender
 
 class AIContentGenerator:
     def __init__(self, api_key: str):
@@ -194,12 +194,12 @@ def main():
     
     generator = AIContentGenerator(api_key)
     notifier = DiscordNotifier()
-    drive_manager = GoogleDriveManager()
+    email_sender = EmailSender()
     
     print("=" * 60)
-    print("AI記事自動生成システム起動 (Google Drive版)")
+    print("AI記事自動生成システム起動 (メール送信版)")
     print(f"日時: {generator.today.strftime('%Y年%m月%d日 %H:%M:%S')}")
-    print(f"テーマ: {drive_manager.theme}")
+    print(f"テーマ: {email_sender.theme}")
     print("=" * 60)
     
     # ステップ1: 記事アイデア生成
@@ -240,25 +240,24 @@ def main():
     generator.save_article(article, filename)
     print(f"\n💾 記事を保存しました: {filename}")
     
-    # ステップ6: Google Driveにアップロード
-    print("\n☁️  Google Driveにアップロード中...")
-    drive_link = drive_manager.upload_article(filename, article['title'])
+    # ステップ6: メールで送信
+    print("\n📧 メールで送信中...")
+    email_success = email_sender.send_article(article, filename)
     
-    if drive_link:
-        print(f"✅ Google Driveに保存しました")
-        print(f"   リンク: {drive_link}")
+    if email_success:
+        print(f"✅ メールを送信しました")
         
-        # ステップ7: Discord通知（Driveリンク付き）
+        # ステップ7: Discord通知（メール送信完了）
         print("\n📤 Discordに完了通知を送信中...")
-        notifier.send_article_saved(article, drive_link, drive_manager.theme)
+        notifier.send_article_emailed(article, email_sender.receiver_email, email_sender.theme)
     else:
-        print("⚠️ Google Driveへの保存に失敗しました")
-        print("   記事はローカルに保存されています: {filename}")
+        print("⚠️ メール送信に失敗しました")
+        print(f"   記事はローカルに保存されています: {filename}")
     
     print("\n" + "=" * 60)
     print("✅ すべての処理が完了しました！")
-    if drive_link:
-        print("📱 DiscordでGoogle Driveリンクを確認できます")
+    if email_success:
+        print("📧 メールボックスを確認してください")
     print("=" * 60)
 
 
