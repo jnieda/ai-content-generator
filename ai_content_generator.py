@@ -1,7 +1,7 @@
 """
 AI初心者向けNote記事自動生成システム
-毎日午前5時に実行して、記事案の提案→承認→記事生成→通知を行う
-Discord通知対応版
+毎日午前5時に実行して、記事案の提案→承認→記事生成→Google Drive保存→通知を行う
+Discord通知 + Google Drive保存版
 """
 
 import anthropic
@@ -11,6 +11,7 @@ import os
 from typing import List, Dict
 import requests
 from discord_notifier import DiscordNotifier
+from google_drive_manager import GoogleDriveManager
 
 class AIContentGenerator:
     def __init__(self, api_key: str):
@@ -193,10 +194,12 @@ def main():
     
     generator = AIContentGenerator(api_key)
     notifier = DiscordNotifier()
+    drive_manager = GoogleDriveManager()
     
     print("=" * 60)
-    print("AI記事自動生成システム起動 (Discord版)")
+    print("AI記事自動生成システム起動 (Google Drive版)")
     print(f"日時: {generator.today.strftime('%Y年%m月%d日 %H:%M:%S')}")
+    print(f"テーマ: {drive_manager.theme}")
     print("=" * 60)
     
     # ステップ1: 記事アイデア生成
@@ -232,18 +235,30 @@ def main():
     print(f"   文字数: 約{len(article['body'])}文字")
     print(f"   ハッシュタグ: {', '.join(article['hashtags'])}")
     
-    # ステップ5: 記事を保存
+    # ステップ5: 記事をローカルに保存
     filename = f"{generator.today.strftime('%Y%m%d')}_article.md"
     generator.save_article(article, filename)
     print(f"\n💾 記事を保存しました: {filename}")
     
-    # ステップ6: 記事ファイルをDiscordに送信
-    print("\n📤 記事ファイルをDiscordに送信中...")
-    notifier.send_article_file(article, filename, filename)
+    # ステップ6: Google Driveにアップロード
+    print("\n☁️  Google Driveにアップロード中...")
+    drive_link = drive_manager.upload_article(filename, article['title'])
+    
+    if drive_link:
+        print(f"✅ Google Driveに保存しました")
+        print(f"   リンク: {drive_link}")
+        
+        # ステップ7: Discord通知（Driveリンク付き）
+        print("\n📤 Discordに完了通知を送信中...")
+        notifier.send_article_saved(article, drive_link, drive_manager.theme)
+    else:
+        print("⚠️ Google Driveへの保存に失敗しました")
+        print("   記事はローカルに保存されています: {filename}")
     
     print("\n" + "=" * 60)
     print("✅ すべての処理が完了しました！")
-    print("📱 Discordで記事ファイルをダウンロードできます")
+    if drive_link:
+        print("📱 DiscordでGoogle Driveリンクを確認できます")
     print("=" * 60)
 
 
