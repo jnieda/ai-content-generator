@@ -355,18 +355,18 @@ class DiscordNotifier:
             print(f"❌ ファイル送信エラー: {e}")
 
 
-    def send_article_saved(self, article: Dict, drive_link: str, theme: str):
+    def send_article_emailed(self, article: Dict, email_address: str, theme: str):
         """
-        記事がGoogle Driveに保存されたことを通知
+        記事がメールで送信されたことを通知
         
         Args:
             article: 記事データ
-            drive_link: Google DriveのWebビューリンク
+            email_address: 送信先メールアドレス
             theme: テーマ名
         """
         if not self.webhook_url:
-            print("📧 [Google Drive保存通知]")
-            print(f"リンク: {drive_link}")
+            print("📧 [メール送信完了通知]")
+            print(f"送信先: {email_address}")
             return
         
         # 保存場所の情報
@@ -395,8 +395,13 @@ class DiscordNotifier:
                         "inline": False
                     },
                     {
-                        "name": "📁 保存場所",
-                        "value": f"AI記事自動生成 > {theme} > {year_month}",
+                        "name": "📧 送信先",
+                        "value": f"{email_address}",
+                        "inline": False
+                    },
+                    {
+                        "name": "📁 テーマ",
+                        "value": f"{theme} > {year_month}",
                         "inline": False
                     },
                     {
@@ -413,11 +418,10 @@ class DiscordNotifier:
             {
                 "title": "📝 次のステップ",
                 "description": (
-                    "1️⃣ 下のリンクからGoogle Driveを開く\n"
-                    "2️⃣ 記事をダウンロード or オンラインで確認\n"
+                    "1️⃣ メールボックスを開く\n"
+                    "2️⃣ 添付ファイル（.md）をダウンロード\n"
                     "3️⃣ 内容をNoteにコピペ\n"
                     "4️⃣ 公開\n\n"
-                    f"[🔗 **Google Driveで開く**]({drive_link})\n\n"
                     "⏰ **所要時間: 約3分**"
                 ),
                 "color": 3447003,  # 青色
