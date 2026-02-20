@@ -99,15 +99,6 @@ class ArticleGenerator:
 {strategy}
 </content_strategy>
 
-以下のJSON形式で出力してください：
-{{
-  "title": "記事タイトル（SEO最適化済み）",
-  "body": "記事本文（Markdown形式、見出し・箇条書き含む）",
-  "hashtags": ["タグ1", "タグ2", "タグ3", "タグ4", "タグ5"],
-  "summary": "記事の要約（150文字以内）",
-  "estimated_read_time": "5分"
-}}
-
 重要な指示：
 - 本文は{idea['target_word_count']}文字前後
 - 見出しは ## と ### を使用
@@ -115,23 +106,74 @@ class ArticleGenerator:
 - 初心者にも分かりやすく
 - 専門用語は必ず解説
 - 最後にCTAを含める
+
+**必ず以下のJSON形式だけで出力してください。他の説明文は不要です。**
+
+{{
+  "title": "記事タイトル（SEO最適化済み）",
+  "body": "記事本文（Markdown形式、見出し・箇条書き含む。改行は\\nでエスケープ）",
+  "hashtags": ["タグ1", "タグ2", "タグ3", "タグ4", "タグ5"],
+  "summary": "記事の要約（150文字以内）",
+  "estimated_read_time": "5分"
+}}
 """
 
         print("🤖 Claudeに記事執筆を依頼中...")
 
         message = self.client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=8000,
+            max_tokens=16000,  # 8000 → 16000に増量
             messages=[{"role": "user", "content": prompt}]
         )
 
         response_text = message.content[0].text
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            response_text = response_text.split("```")[1].split("```")[0].strip()
-
-        return json.loads(response_text)
+        
+        # デバッグ用：応答の最初と最後を確認
+        print(f"📝 応答の長さ: {len(response_text)} 文字")
+        print(f"📝 応答の最初: {response_text[:100]}...")
+        print(f"📝 応答の最後: ...{response_text[-100:]}")
+        
+        # コードブロックの除去（より堅牢に）
+        original_text = response_text
+        
+        # ```json ... ``` パターン
+        if "```json" in response_text and "```" in response_text[response_text.index("```json")+7:]:
+            start = response_text.index("```json") + 7
+            end = response_text.index("```", start)
+            response_text = response_text[start:end].strip()
+        # ``` ... ``` パターン
+        elif response_text.count("```") >= 2:
+            first_tick = response_text.index("```")
+            second_tick = response_text.index("```", first_tick + 3)
+            response_text = response_text[first_tick+3:second_tick].strip()
+        
+        # JSON開始/終了の検証
+        if not response_text.strip().startswith("{"):
+            # { を探す
+            if "{" in response_text:
+                response_text = response_text[response_text.index("{"):]
+        
+        if not response_text.strip().endswith("}"):
+            # 最後の } を探す
+            if "}" in response_text:
+                response_text = response_text[:response_text.rindex("}")+1]
+        
+        # JSONパース
+        try:
+            return json.loads(response_text)
+        except json.JSONDecodeError as e:
+            print(f"❌ JSONパースエラー: {e}")
+            print(f"❌ 問題の箇所付近: {response_text[max(0, e.pos-50):e.pos+50]}")
+            
+            # 応答全体をファイルに保存（デバッグ用）
+            debug_file = f"debug_response_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            with open(debug_file, 'w', encoding='utf-8') as f:
+                f.write("=== Original Response ===\n")
+                f.write(original_text)
+                f.write("\n\n=== Extracted JSON ===\n")
+                f.write(response_text)
+            print(f"❌ 詳細は {debug_file} を確認してください")
+            raise
 
     def save_article(self, article, filename):
         content = f"""# {article['title']}
