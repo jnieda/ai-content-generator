@@ -107,70 +107,72 @@ class ArticleGenerator:
 - 専門用語は必ず解説
 - 最後にCTAを含める
 
-**必ず以下のJSON形式だけで出力してください。他の説明文は不要です。**
+**以下のXML形式で出力してください：**
 
-{{
-  "title": "記事タイトル（SEO最適化済み）",
-  "body": "記事本文（Markdown形式、見出し・箇条書き含む。改行は\\nでエスケープ）",
-  "hashtags": ["タグ1", "タグ2", "タグ3", "タグ4", "タグ5"],
-  "summary": "記事の要約（150文字以内）",
-  "estimated_read_time": "5分"
-}}
+<article>
+<title>記事タイトル（SEO最適化済み）</title>
+<body>
+記事本文（Markdown形式、見出し・箇条書き含む）
+複数行でOK
+</body>
+<hashtags>
+<tag>タグ1</tag>
+<tag>タグ2</tag>
+<tag>タグ3</tag>
+<tag>タグ4</tag>
+<tag>タグ5</tag>
+</hashtags>
+<summary>記事の要約（150文字以内）</summary>
+<estimated_read_time>5分</estimated_read_time>
+</article>
 """
 
         print("🤖 Claudeに記事執筆を依頼中...")
 
         message = self.client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=16000,  # 8000 → 16000に増量
+            max_tokens=16000,
             messages=[{"role": "user", "content": prompt}]
         )
 
         response_text = message.content[0].text
         
-        # デバッグ用：応答の最初と最後を確認
         print(f"📝 応答の長さ: {len(response_text)} 文字")
-        print(f"📝 応答の最初: {response_text[:100]}...")
-        print(f"📝 応答の最後: ...{response_text[-100:]}")
         
-        # コードブロックの除去（より堅牢に）
-        original_text = response_text
+        # XMLを抽出
+        import xml.etree.ElementTree as ET
         
-        # ```json ... ``` パターン
-        if "```json" in response_text and "```" in response_text[response_text.index("```json")+7:]:
-            start = response_text.index("```json") + 7
-            end = response_text.index("```", start)
-            response_text = response_text[start:end].strip()
-        # ``` ... ``` パターン
-        elif response_text.count("```") >= 2:
-            first_tick = response_text.index("```")
-            second_tick = response_text.index("```", first_tick + 3)
-            response_text = response_text[first_tick+3:second_tick].strip()
-        
-        # JSON開始/終了の検証
-        if not response_text.strip().startswith("{"):
-            # { を探す
-            if "{" in response_text:
-                response_text = response_text[response_text.index("{"):]
-        
-        if not response_text.strip().endswith("}"):
-            # 最後の } を探す
-            if "}" in response_text:
-                response_text = response_text[:response_text.rindex("}")+1]
-        
-        # JSONパース
         try:
-            return json.loads(response_text)
-        except json.JSONDecodeError as e:
-            print(f"❌ JSONパースエラー: {e}")
-            print(f"❌ 問題の箇所付近: {response_text[max(0, e.pos-50):e.pos+50]}")
+            # <article>...</article> を抽出
+            if "<article>" in response_text and "</article>" in response_text:
+                start = response_text.index("<article>")
+                end = response_text.index("</article>") + len("</article>")
+                xml_text = response_text[start:end]
+            else:
+                xml_text = response_text
             
-            # 応答全体をファイルに保存（デバッグ用）
+            # XMLをパース
+            root = ET.fromstring(xml_text)
+            
+            # データを抽出
+            article = {
+                "title": root.find("title").text.strip() if root.find("title") is not None else "",
+                "body": root.find("body").text.strip() if root.find("body") is not None else "",
+                "hashtags": [tag.text.strip() for tag in root.findall(".//hashtags/tag") if tag.text],
+                "summary": root.find("summary").text.strip() if root.find("summary") is not None else "",
+                "estimated_read_time": root.find("estimated_read_time").text.strip() if root.find("estimated_read_time") is not None else "5分"
+            }
+            
+            print(f"✅ XMLパース成功")
+            return article
+            
+        except ET.ParseError as e:
+            print(f"❌ XMLパースエラー: {e}")
+            print(f"❌ 応答の最初: {response_text[:500]}")
+            
+            # デバッグ用ファイル保存
             debug_file = f"debug_response_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
             with open(debug_file, 'w', encoding='utf-8') as f:
-                f.write("=== Original Response ===\n")
-                f.write(original_text)
-                f.write("\n\n=== Extracted JSON ===\n")
                 f.write(response_text)
             print(f"❌ 詳細は {debug_file} を確認してください")
             raise
