@@ -127,58 +127,76 @@ class IdeaGenerator:
 5. 目標文字数
 6. 推定読了時間
 
-JSON形式で出力してください：
-{{
-  "ideas": [
-    {{
-      "id": 1,
-      "title": "...",
-      "category": "...",
-      "key_points": ["...", "..."],
-      "why_now": "...",
-      "target_word_count": 2000,
-      "estimated_read_time": "5分"
-    }},
-    ...
-  ]
-}}
+**以下のXML形式で出力してください：**
+
+<ideas>
+<idea>
+<id>1</id>
+<title>...</title>
+<category>...</category>
+<key_points>
+<point>...</point>
+<point>...</point>
+<point>...</point>
+</key_points>
+<why_now>...</why_now>
+<target_word_count>2000</target_word_count>
+<estimated_read_time>5分</estimated_read_time>
+</idea>
+<idea>
+<id>2</id>
+...
+</idea>
+<idea>
+<id>3</id>
+...
+</idea>
+</ideas>
 """
 
         print("🤖 Claudeに記事アイデアを依頼中...")
 
         message = self.client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=4000,  # 2000 → 4000に増量
+            max_tokens=4000,
             messages=[{"role": "user", "content": prompt}]
         )
 
         response_text = message.content[0].text
         
-        # コードブロックの除去（より堅牢に）
-        if "```json" in response_text and "```" in response_text[response_text.index("```json")+7:]:
-            start = response_text.index("```json") + 7
-            end = response_text.index("```", start)
-            response_text = response_text[start:end].strip()
-        elif response_text.count("```") >= 2:
-            first_tick = response_text.index("```")
-            second_tick = response_text.index("```", first_tick + 3)
-            response_text = response_text[first_tick+3:second_tick].strip()
+        # XMLを抽出してパース
+        import xml.etree.ElementTree as ET
         
-        # JSON開始/終了の検証
-        if not response_text.strip().startswith("{"):
-            if "{" in response_text:
-                response_text = response_text[response_text.index("{"):]
-        if not response_text.strip().endswith("}"):
-            if "}" in response_text:
-                response_text = response_text[:response_text.rindex("}")+1]
-
         try:
-            data = json.loads(response_text)
-            return data["ideas"]
-        except (json.JSONDecodeError, KeyError) as e:
-            print(f"❌ JSONパースエラー: {e}")
-            print(f"❌ 応答の最初: {response_text[:200]}")
-            print(f"❌ 応答の最後: {response_text[-200:]}")
+            # <ideas>...</ideas> を抽出
+            if "<ideas>" in response_text and "</ideas>" in response_text:
+                start = response_text.index("<ideas>")
+                end = response_text.index("</ideas>") + len("</ideas>")
+                xml_text = response_text[start:end]
+            else:
+                xml_text = response_text
+            
+            root = ET.fromstring(xml_text)
+            
+            ideas = []
+            for idea_elem in root.findall("idea"):
+                idea = {
+                    "id": int(idea_elem.find("id").text) if idea_elem.find("id") is not None else 0,
+                    "title": idea_elem.find("title").text.strip() if idea_elem.find("title") is not None else "",
+                    "category": idea_elem.find("category").text.strip() if idea_elem.find("category") is not None else "",
+                    "key_points": [p.text.strip() for p in idea_elem.findall(".//key_points/point") if p.text],
+                    "why_now": idea_elem.find("why_now").text.strip() if idea_elem.find("why_now") is not None else "",
+                    "target_word_count": int(idea_elem.find("target_word_count").text) if idea_elem.find("target_word_count") is not None else 2000,
+                    "estimated_read_time": idea_elem.find("estimated_read_time").text.strip() if idea_elem.find("estimated_read_time") is not None else "5分"
+                }
+                ideas.append(idea)
+            
+            print(f"✅ XMLパース成功: {len(ideas)}件のアイデア")
+            return ideas
+            
+        except (ET.ParseError, AttributeError) as e:
+            print(f"❌ XMLパースエラー: {e}")
+            print(f"❌ 応答の最初: {response_text[:500]}")
             raise
 
 
