@@ -148,18 +148,38 @@ JSON形式で出力してください：
 
         message = self.client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=2000,
+            max_tokens=4000,  # 2000 → 4000に増量
             messages=[{"role": "user", "content": prompt}]
         )
 
         response_text = message.content[0].text
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            response_text = response_text.split("```")[1].split("```")[0].strip()
+        
+        # コードブロックの除去（より堅牢に）
+        if "```json" in response_text and "```" in response_text[response_text.index("```json")+7:]:
+            start = response_text.index("```json") + 7
+            end = response_text.index("```", start)
+            response_text = response_text[start:end].strip()
+        elif response_text.count("```") >= 2:
+            first_tick = response_text.index("```")
+            second_tick = response_text.index("```", first_tick + 3)
+            response_text = response_text[first_tick+3:second_tick].strip()
+        
+        # JSON開始/終了の検証
+        if not response_text.strip().startswith("{"):
+            if "{" in response_text:
+                response_text = response_text[response_text.index("{"):]
+        if not response_text.strip().endswith("}"):
+            if "}" in response_text:
+                response_text = response_text[:response_text.rindex("}")+1]
 
-        data = json.loads(response_text)
-        return data["ideas"]
+        try:
+            data = json.loads(response_text)
+            return data["ideas"]
+        except (json.JSONDecodeError, KeyError) as e:
+            print(f"❌ JSONパースエラー: {e}")
+            print(f"❌ 応答の最初: {response_text[:200]}")
+            print(f"❌ 応答の最後: {response_text[-200:]}")
+            raise
 
 
 def main():
