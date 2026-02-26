@@ -129,17 +129,38 @@ class ArticleGenerator:
 
         print("🤖 Claudeに記事執筆を依頼中...")
 
-        message = self.client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=16000,
-            messages=[{"role": "user", "content": prompt}]
-        )
+        # リトライロジック（最大3回）
+        max_retries = 3
+        retry_delay = 5  # 秒
+        
+        for attempt in range(max_retries):
+            try:
+                message = self.client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=16000,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                break  # 成功したらループを抜ける
+                
+            except Exception as e:
+                error_type = type(e).__name__
+                print(f"⚠️  試行 {attempt + 1}/{max_retries} 失敗: {error_type}")
+                
+                if attempt < max_retries - 1:
+                    import time
+                    wait_time = retry_delay * (2 ** attempt)  # 指数バックオフ: 5秒 → 10秒 → 20秒
+                    print(f"   {wait_time}秒待機後に再試行...")
+                    time.sleep(wait_time)
+                else:
+                    print(f"❌ {max_retries}回試行しましたが失敗しました")
+                    raise
 
         response_text = message.content[0].text
         
         print(f"📝 応答の長さ: {len(response_text)} 文字")
         
-        # XMLを抽出
+        # ハイブリッド抽出：body は正規表現、他はXMLパース
+        import re
         import xml.etree.ElementTree as ET
         
         try:
@@ -151,22 +172,29 @@ class ArticleGenerator:
             else:
                 xml_text = response_text
             
-            # XMLをパース
-            root = ET.fromstring(xml_text)
+            # body部分だけ正規表現で抽出（特殊文字に強い）
+            body_match = re.search(r'<body>\s*(.*?)\s*</body>', xml_text, re.DOTALL)
+            if not body_match:
+                raise ValueError("body タグが見つかりません")
+            body_content = body_match.group(1).strip()
+            
+            # bodyを一時的に削除してXMLパース
+            xml_without_body = re.sub(r'<body>.*?</body>', '<body>PLACEHOLDER</body>', xml_text, flags=re.DOTALL)
+            root = ET.fromstring(xml_without_body)
             
             # データを抽出
             article = {
-                "title": root.find("title").text.strip() if root.find("title") is not None else "",
-                "body": root.find("body").text.strip() if root.find("body") is not None else "",
+                "title": root.find("title").text.strip() if root.find("title") is not None and root.find("title").text else "",
+                "body": body_content,  # 正規表現で抽出した本文を使用
                 "hashtags": [tag.text.strip() for tag in root.findall(".//hashtags/tag") if tag.text],
-                "summary": root.find("summary").text.strip() if root.find("summary") is not None else "",
-                "estimated_read_time": root.find("estimated_read_time").text.strip() if root.find("estimated_read_time") is not None else "5分"
+                "summary": root.find("summary").text.strip() if root.find("summary") is not None and root.find("summary").text else "",
+                "estimated_read_time": root.find("estimated_read_time").text.strip() if root.find("estimated_read_time") is not None and root.find("estimated_read_time").text else "5分"
             }
             
             print(f"✅ XMLパース成功")
             return article
             
-        except ET.ParseError as e:
+        except (ET.ParseError, ValueError) as e:
             print(f"❌ XMLパースエラー: {e}")
             print(f"❌ 応答の最初: {response_text[:500]}")
             
@@ -244,7 +272,24 @@ def main():
 
     # 3. 記事生成
     generator = ArticleGenerator(anthropic_key)
-    article = generator.generate_article(selected_idea)
+    
+    try:
+        article = generator.generate_article(selected_idea)
+    except Exception as e:
+        print(f"❌ 記事生成に失敗しました: {e}")
+        
+        # Discord通知
+        notifier = DiscordNotifier()
+        notifier.send_simple_message(
+            "❌ 記事生成に失敗",
+            f"選択された記事: {selected_idea['title']}\n\n"
+            f"APIエラーが発生しました。\n"
+            f"エラー: {type(e).__name__}\n"
+            f"詳細: {str(e)[:200]}\n\n"
+            f"次回の実行時に再試行されます。",
+            color=15158332  # 赤色
+        )
+        return
 
     print(f"\n✅ 記事生成完了！")
     print(f"   タイトル: {article['title']}")
